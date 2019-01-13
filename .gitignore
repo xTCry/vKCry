@@ -1,0 +1,14 @@
+# Dependency directories
+node_modules/
+
+.config.js
+
+# Other
+data_/
+img/
+
+data/*
+cache/*
+
+!*.keep
+!**/*.keep
