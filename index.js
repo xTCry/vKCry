@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { VK, Keyboard } = require('vk-io');
+const { auth, VK, Keyboard, AuthError, authErrors } = require('vk-io');
 
 process.on('uncaughtException', (err) => {
 	console.log("\n*===*\nERR:");
@@ -13,8 +13,8 @@ const fLog = require("./lib/fLog");
 
 const izCap = require("./lib/izCap");
 let izCapUser = false;
-// const izQv = require("./lib/izQ");
-// let izQ = false;
+const izQv = require("./lib/izQ");
+let izQ = false;
 
 const vUsers = require("./lib/usersData");
 let users = false;
@@ -37,44 +37,121 @@ var test1 = izCapDatatest = fastUsers = false;
 var dataUser = false;
 	usersLoaded = true;
 
-function startApp() {
+
+async function startApp() {
 
 	LongP = _.require("./LongPoll");
+	_.black_auth.addLoad(_=> { });
 
-	_.black_auth.addLoad(()=> {
+	if(!isForceUID && !autoSelect) {
+		await tryLoginVK();
+	}
+	else {
+		_.black_auth.addLoad(()=> {
 
-		test1 = _.black_auth.getArray();
-		if(test1.length > 0) {
-			vk2.token = test1[0].token;
-			izCapDatatest = new izCap("./data/users_data", false, _);
-			fastUsers = new vUsers(vk2, _, izCapDatatest);
-		}
-		else {
-			_.con("NULL Tokens", true);
-			return;
-		}
+			test1 = _.black_auth.getArray();
+			if(test1.length > 0) {
+				vk2.token = test1.find(x => x.id == 191039467).token;
+				izCapDatatest = new izCap("./data/users_data_test", false, _);
+				fastUsers = new vUsers(vk2, _, izCapDatatest);
+			}
+			else {
+				_.con("NULL Tokens", true);
+				return;
+			}
 
-		if(autoSelect) {
-			setTimeout(selectUser, 1e3);
-		}
-		else {
-			if(isForceUID)
-				setUserPR(UID)
-			else
-				_.rl.question("Enter userID (-1, -2, -3, -4, -5, -6, -7) or default ("+UID+"): ", setUserPR);
-		}
-	})
-	.load();
+			if(autoSelect) {
+				setTimeout(selectUser, 1e3);
+			}
+			else {
+				if(isForceUID)
+					setUserPR(UID)
+				else
+					_.rl.question("Enter userID (-1, -2, -3, -4, -5, -6, -7) or default ("+UID+"): ", setUserPR);
+			}
+		})
+		.load();
+	}
 }
 
-function selectUser() {
+
+
+async function tryLoginVK() {
+	let login = await loginVK();
+
+	if(login && login.user > 0) {
+		// UID = login.user;
+		await setUserPR(login)
+	}
+	else {
+		console.log("Failed auth! Try now");
+		return tryLoginVK();
+	}
+}
+
+async function loginVK() {
+
+	let login = await _.rl.questionAsync("Login: ");
+
+	console.log("Password: ");
+	_.rl.hideMode = true;
+	let password = await _.rl.questionAsync("");
+	_.rl.hideMode = false;
+
+	vk.setOptions({
+		login,
+		password,
+	});
+
+	const direct = vk.auth.androidApp();
+
+	vk.captchaHandler = async ({ src, type }, retry)=> {
+		let key = await _.rl.questionAsync("Enter captcha ["+src+"]: ");
+
+		try {
+			await retry(key);
+
+			console.log('Success');
+		} catch (e) { console.error(e); }
+	};
+	vk.twoFactorHandler = async (none, retry)=> {
+		let code = await _.rl.questionAsync("Enter twoFactor code: ");
+
+		try {
+			await retry(code);
+
+			console.log('Success');
+		} catch (e) { console.error(e); }
+	};
+
+
+	let res = false;
+	try {
+		res = await direct.run();
+		console.log(res);
+	} catch(e) {
+		if (e instanceof AuthError) {
+			if (e.code === authErrors.AUTHORIZATION_FAILED) {
+				console.log('Авторизация провалилась');
+			}
+			else if (e.code === authErrors.PAGE_BLOCKED) {
+				console.log('Страница заблокирована :c');
+			}
+		}
+		console.error(e);
+	}
+	
+	return res;
+}
+
+async function selectUser() {
 
 	var Uobj = _.black_auth.getObject(),
 		Uarr = Object.keys(Uobj),
 		msg = "Select:";
 
 	for (var i = 0; i < Uarr.length; i++) {
-		var _sData = fastUsers ? fastUsers.get(Uobj[Uarr[i]].id) : {};
+		var _sData = fastUsers ? await fastUsers.get(Uobj[Uarr[i]].id) : {};
 		_sData = " "+(_sData && _sData.first_name?(_sData.first_name + " " + _sData.last_name) : "");
 
 		// msg += (i%3==0?"\n":"\t")+(i+1)+". "+Uobj[Uarr[i]].id
@@ -90,61 +167,69 @@ function selectUser() {
 	});
 }
 
-function setUserPR(data) {
-	if(data != "" || UID < 0) {
-		if(data == "" && UID < 0) data = UID
-		if(data < 0) {
-			data *= -1;
-			if(data == 1) data = 191039467;
+async function setUserPR(data) {
+	if(typeof data !== 'object' || !("token" in data)) {
+		if(data != "" || UID < 0) {
+			if(data == "" && UID < 0) data = UID;
+			if(data < 0) {
+				data *= -1;
+				if(data == 1) data = 191039467;
+			}
+			UID = data;
 		}
-		UID = data;
+		dataUser = _.black_auth.get("id"+UID);
+		vk.token = dataUser.token;
 	}
-	dataUser = _.black_auth.get("id"+UID)
+	else if("token" in data) {
+		UID = data.user;
+		vk.token = data.token;
+	}
+	else
+		return _.con("Fail...");
+
 	_.con("Select user id"+UID);
 
 	// Test token
-	vk.token = dataUser.token;
-
-	vk.api.users.get()
-	.then((data) => {
-		console.log(data);
-		setUser(dataUser);
-	})
-	.catch((error) => {
+	try {
+		let data = await vk.api.users.get();
+		// console.log(data);
+		await setUser(dataUser);
+	} catch(error) {
 		console.error('Error get user data. API Error:\n\t', error.message);
 		if(error.code == 5) {
 			_.con("RIP Token!", true);
 		}
-	});
+		tryLoginVK();
+	};
 
 }
 
 
-function setUser(dataUser) {
+async function setUser(dataUser) {
 	if(!dataUser)
 		return _.con("Non user id"+UID, true);
 
-	izQ = false;//izQv.izQ(_, "uid_"+UID)
+	izQ = izQv.izQ(_, "uid_"+UID)
 	izCapUser = new izCap("./data/user_cache_"+UID, false, _);
 	izCapData = new izCap("./data/user_data_"+UID, false, _);
 	users = new vUsers(vk, _, izCapUser);
 
-	var rl = false;
-	_.init(izCapUser, izQ, users, UID, izCapData, rl, vk);
+	_.init(izCapUser, izQ, users, UID, izCapData, false, vk);
 	_.initVkLog(vkLog);
 	_.sfLog(fLog);
 
 	vk.token = dataUser.token;
 	
-	var _sData = users.get(UID, (data)=> {
+	try {
+		let data = await users.get(UID);
 		var _sName = data.first_name + " " + data.last_name;
 		_.con("User loaded: "+_sName);
-	});
 
-	setTimeout(startLP, 1000);
+		await startLP();
+	} catch(e) { console.error(e); }
 }
 
-function startLP() {
+async function startLP() {
 	_.setTime(vk);
 	_.con("Start LongPoll");
 	LongP(vk, _, restartApp);
@@ -153,9 +238,8 @@ function startLP() {
 function restartApp(isStop) {
 	vk.updates.stop();
 
-	if(izCapUser) izCapUser.save();
-	if(izCapData) izCapData.save();
 	if(users) users.safeSave();
+	if(izCapData) izCapData.save();
 
 	izCap.reizCS();
 
@@ -207,15 +291,26 @@ var rl = _.setLine((line) => {
 // var dialDumper = require("./modules/dialDumper");
 // var dialDumperBea = require("./modules/dialDumperBea");
 
-var rl2 = _.setLine((line) => {
+rl = _.setLine((line) => {
 	switch(line.trim()) {
 		case '':
 		case 'hh':
 		case 'save':
-			rl2.prompt();
+			rl.prompt();
 			break;
 	}
 });
+
+
+// Hide passwordMode
+rl._writeToOutput = (s)=> {
+	rl.output.write(rl.hideMode && !(/^\s*$/.test(s))? "*": s);
+};
+rl.questionAsync = (question) => {
+	return new Promise((resolve) => {
+		rl.question(question, resolve);
+	});
+};
 
 //
 
@@ -291,17 +386,17 @@ for (var argn = 2; argn < process.argv.length; argn++) {
 	}
 }
 
-if(fastToken) {
-	vk.token = fastToken;
-
-	vk.api.users.get()
-	.then((data) => {
-		console.log(data);
-	})
-	.catch((error) => {
-		console.error('Error get user data. API Error:', error);
-	});
-}
-else
-	startApp();
-
+(async _=> {
+	if(fastToken) {
+		vk.token = fastToken;
+		try {
+			let user = await vk.api.users.get();
+			console.log(user);
+			_.con("Stop");
+		} catch(error) {
+			console.error('Error get user data. API Error:', error);
+		}
+	}
+	else
+		await startApp();
+})();
