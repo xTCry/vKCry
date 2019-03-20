@@ -23,7 +23,9 @@
     "figures": "^2.0.0",
     "log-symbols": "^2.2.0",
     "log-update": "^2.3.0",
-    "vk-io": "^4.0.0-rc.11",
+    "phpdate-js": "^1.0.3",
+    "sqlite3": "^4.0.6",
+    "vk-io": "^4.0.0-rc.15",
     "yarn": "^1.13.0"
   }
 }
