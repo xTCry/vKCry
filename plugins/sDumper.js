@@ -53,7 +53,7 @@ module.exports = (_vk, _h) => {
 
 	lp.on([ 'new_message', 'edit_message' ], async (context, next) => {
 		const { id, peerId, senderId, createdAt: date,
-			peerType, forwards, attachments, isOutbox: outbox } = context;
+			peerType, forwards, attachments, isOutbox: outbox, hasText } = context;
 		let { text } = context;
 		text = text? text: "";
 
@@ -79,8 +79,8 @@ module.exports = (_vk, _h) => {
 		*/
 		
 		// скипать сообщения групп
-		if(peerId < 0)
-			return await next();;
+		// if(peerId < 0)
+		// 	return await next();
 		
 		// 
 		// console.log("M_Before", context);
@@ -115,8 +115,42 @@ module.exports = (_vk, _h) => {
 			attachmentsArray = [];
 
 		if(context.hasReplyMessage) {
-			let { text: _text, id: _id, senderId: _senderId, peerId: _peerId, createdAt: _date } = context.replyMessage;
-			
+			let { text: _text, id: _id, senderId: _senderId, peerId: _peerId, createdAt: _date, attachments: _att, hasText: _hasText } = context.replyMessage;
+			_text = _text? _text: "";
+
+			let r = await parcAttMessage(_att, 0, frmtMsg, { }, true, true);
+			let attachmentType = r.voices? "voice":
+								r.photosArray.length>0? r.photosArray[0]:
+								"";
+
+
+			let attachment = r.voices? {
+					type: "voice",
+					title: "Голосовое сообщение"
+				}:
+				r.photosArray.length>0? {
+					type: "photo",
+					url: r.photosArray[0].sizes[0].url,
+					...(!_hasText? {
+						title: r.photosArray.length+" фотографий",
+					}: {})
+				}:
+				r.videosArray.length>0? {
+					type: "video",
+					title: r.videosArray[0].title,
+					url: "https://pp.userapi.com/c844617/v844617141/1c4458/jlP1iesjDCU.jpg"
+				}:
+				r.audiosArray.length>0? {
+					type: "audio",
+					title: r.audiosArray[0].title + " - " + r.audiosArray[0].artist
+				}:
+				r.typesArray.length>0? {
+					type: "doc",
+					title: "Документ",
+					subType: r.typesArray[0].typeName
+				}:
+				{ type: "other" };
+				
 			let _sName = await _.getName(_senderId),
 				_outbox = (_senderId==_peerId);
 			let _frmtMsg = "reply MSG -("+_id+") ";
@@ -126,70 +160,50 @@ module.exports = (_vk, _h) => {
 
 			_.con(_frmtMsg+_text, "black", "Green");
 			_.fLog(_frmtMsg+_.htmlEntities(_text), "green", date);
-			// await _.inVkLog(peerId, dialogName, { senderId, sName, outbox, id, text: _frmtMsg+_text, date: _date, color: "yellow" });
 
 			replyTemplate = _.createReplyMessage({
-				replyId: _id,			attachmentType: false,
+				replyId: _id,			attachment,
 				senderId: _senderId,	sName: _sName,
 				outbox: _outbox,		replyMessage: _.htmlEntities(_text)
 			});
 		}
 
 		if (context.hasAttachments()) {
-
-			if(context.hasAttachments("sticker")) {
-				let stkr = context.getAttachments("sticker")[0],
-					// data = "<img src='https://vk.com/images/stickers/"+stkr.id+"/64.png'>";
-					data = "<img src='"+stkr.images[0].url+"'>";
-
-				_.fLog(frmtMsg+ data, date);
-				_.con(frmtMsg+" {STICKER} - "+ stkr.id, "black", "Green");
-
-				attachmentsArray.push({ content: data });
-
-				// _.inVkLog(peerId, dialogName, { senderId, sName, outbox, id, text: data, date });
+			if (!hasText) {
+				_.con(frmtMsg+". attachments...", "black", "Green");
+				_.fLog(frmtMsg+". attachments...", "black", date);
+				// await _.inVkLog(peerId, dialogName, { senderId, sName, outbox, id, text: msgPrfx+"attachments...", date, color: "green" });
 			}
-			 // Если использовалась подзагрузка смс, то не doc, a audio_message
-			else if(context.hasAttachments("audio_message")) {
-				let { voices } = await parcAttMessage(context.getAttachments("audio_message"), 0, frmtMsg, { id, peerId, dialogName, outbox }, true);
-				attachmentsArray.push({ content: voices });
+
+			let {
+				photos, audios, link, types, walls, videos, voices, sticker,
+				photosArray, audiosArray, linkArray, typesArray, wallsArray, videosArray,
+			} = await parcAttMessage(context.getAttachments(), 0, frmtMsg, { id, peerId, dialogName, outbox }, true);
+
+			for(let p of photosArray) {
+				attachmentsArray.push({
+					type: "photo",
+					content: "<img src='"+p.smallPhoto+"'>",
+					link: p.largePhoto,
+					title: "IMG ["+_.dateF(p.createdAt * 1000)+"] "+(p.text? p.text: ""),
+				});
 			}
-			else {
-
-				if (!context.hasText) {
-					_.con(frmtMsg+". attachments...", "black", "Green");
-					_.fLog(frmtMsg+". attachments...", "black", date);
-					// await _.inVkLog(peerId, dialogName, { senderId, sName, outbox, id, text: msgPrfx+"attachments...", date, color: "green" });
-				}
-
-				let {
-					photos, audios, link, types, walls, videos,
-					photosArray, audiosArray, linkArray, typesArray, wallsArray, videosArray,
-				} = await parcAttMessage(context.getAttachments(), 0, frmtMsg, { id, peerId, dialogName, outbox }, true);
-				
-				for(let p of photosArray) {
-					attachmentsArray.push({
-						type: "photo",
-						content: "<img src='"+p.smallPhoto+"'>",
-						link: p.largePhoto,
-						title: "IMG ["+_.dateF(p.createdAt * 1000)+"] "+(p.text? p.text: ""),
-					});
-				}
-				for(let p of audiosArray) {
-					attachmentsArray.push({
-						type: "audio",
-						content: (p.url!=""?
-							"<audio controls><source src='"+p.url+"' type='audio/mpeg'></audio>":
-							"<b>NO URL AUDIO</b>"),
-						title: "Audio title: "+p.artist+" -- "+p.title,
-					});
-				}
-
-				link!="" && attachmentsArray.push({ content: link,  });
-				walls!="" && attachmentsArray.push({ content: walls, });
-				types!="" && attachmentsArray.push({ content: types, });
-				videos!="" && attachmentsArray.push({ content: videos, });
+			for(let p of audiosArray) {
+				attachmentsArray.push({
+					type: "audio",
+					content: (p.url!=""?
+						"<audio controls><source src='"+p.url+"' type='audio/mpeg'></audio>":
+						"<b>NO URL AUDIO</b>"),
+					title: "Audio title: "+p.artist+" -- "+p.title,
+				});
 			}
+
+			link!="" && attachmentsArray.push({ content: link,  });
+			walls!="" && attachmentsArray.push({ content: walls, });
+			types!="" && attachmentsArray.push({ content: types, });
+			videos!="" && attachmentsArray.push({ content: videos, });
+			voices!="" && attachmentsArray.push({ content: voices });
+			sticker!="" && attachmentsArray.push({ content: sticker });
 		}
 		else if (context.text == "" && !context.hasForwards) {
 			console.log(context);
@@ -218,14 +232,14 @@ module.exports = (_vk, _h) => {
 		}
 		
 
-		if (context.hasText) {
+		if (hasText) {
 			_.con(frmtMsg+text, "black", (isEdited? "Yellow": "Green"))
 			_.fLog(frmtMsg+text, (isEdited? "#ffc107": "black"), (isEdited? false: date));
 		}
 
 		text = replyTemplate + _.htmlEntities(text) + forwardsTemplate;
 
-		if (/*context.hasText*/ text != "" || attachmentsArray.length > 0) {
+		if (/*hasText*/ text != "" || attachmentsArray.length > 0) {
 			await _.inVkLog(peerId, dialogName, {
 				isEdited, senderId, sName, outbox, id, date:(isEdited? _.dateF(): date),
 				attachments: attachmentsArray, color: (isEdited? "#ffc107": false),
@@ -309,7 +323,7 @@ async function parcAttMessage(msgAtt, flo, frmtMsg, data, noMode, noConsole) {
 	noMode = noMode || false;
 
 	let r = {
-		photos: "", walls: "", videos: "", audios: "", voices: "", link: "", types: "",
+		photos: "", walls: "", videos: "", audios: "", voices: "", link: "", types: "", sticker: "",
 		photosArray: [], videosArray: [], wallsArray: [], audiosArray: [], linkArray: [], typesArray: [],
 	};
 
@@ -325,6 +339,12 @@ async function parcAttMessage(msgAtt, flo, frmtMsg, data, noMode, noConsole) {
 					r.voices += text;
 					!noConsole && _.con(frmtMsg+" {AUDIO_MSG} - "+ att.url, "black", "Green");
 				}
+				else if(att.type == "sticker") {
+					let text = "<img src='"+att.images[0].url+"'>";
+
+					r.sticker += text;
+					!noConsole && _.con(frmtMsg+" {STICKER} - "+ att.id, "black", "Green");
+				}
 				else if(att.type == "photo") {
 					r.photosArray.push(att);
 					r.photos += "<br><a href='"+att.largePhoto+"' target='_blank'>"+(att.text? att.text: "")+"<img src='"+att.smallPhoto+"' title='["+(att.createdAt>0? _.dateF(att.createdAt * 1000): "")+"]'></a>";
@@ -337,7 +357,7 @@ async function parcAttMessage(msgAtt, flo, frmtMsg, data, noMode, noConsole) {
 								"https://vk.com/video"+att.ownerId+"_"+att.id+"?hash="+att.accessKey;
 					r.videos += "<br><a href='"+link+"' target='_blank'>[VIDEO] "+(att.title? att.title: "")+"</a>";
 
-					!noConsole && _.con(frmtMsg+" {VIDEO} - "+ att.largePhoto, "black", "Green");
+					!noConsole && _.con(frmtMsg+" {VIDEO} - "+ att, "black", "Green");
 				}
 
 				else if(att.type == "wall") {
@@ -458,13 +478,13 @@ async function parcForwardMessage(fwd, data, flo, noMode, noConsole) {
 	!noMode && await _.inVkLog(peerId, dialogName, { isFwd, sName, date, outbox, color: "#ffeb3b", bgColor: "#607d8b", text: frmtMsg+text });
 	
 	let {
-		photos, audios, voices, link, types, walls, videos,
+		photos, audios, voices, link, types, walls, videos, sticker,
 	} = fwd.hasAttachments?
 		await parcAttMessage(fwd.getAttachments(), flo, frmtMsg, { ...data }, noMode, noConsole):
-		{ photos: "", audios: "", voices: "", link: "", types: "", walls: "", videos: "", };
+		{ photos: "", audios: "", voices: "", link: "", types: "", walls: "", videos: "", sticker: "", };
 	
 	formateForwardResult.title = frmtMsg;
-	formateForwardResult.content = text + photos + audios + voices + link + types + walls + videos;
+	formateForwardResult.content = text + photos + audios + voices + link + types + walls + videos + sticker;
 
 	if(flo > 50)
 		return _.fLog("FWD LIMITED max 50", "black"), null;
